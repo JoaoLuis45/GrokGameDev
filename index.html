@@ -1,207 +1,174 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Moto Race Multiplayer</title>
+    <title>Moto Race 3D Multiplayer</title>
     <style>
-        canvas {
-            border: 1px solid black;
-        }
-        #game-container {
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            height: 100vh;
-            background: #87CEEB;
-        }
+        body { margin: 0; overflow: hidden; }
+        #game-container { width: 100vw; height: 100vh; }
     </style>
 </head>
 <body>
-    <div id="game-container">
-        <canvas id="gameCanvas" width="800" height="600"></canvas>
-    </div>
+    <div id="game-container"></div>
 
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
     <script>
-        // Configuração do canvas
-        const canvas = document.getElementById('gameCanvas');
-        const ctx = canvas.getContext('2d');
+        // Configuração da cena 3D
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.getElementById('game-container').appendChild(renderer.domElement);
 
-        // WebSocket para multiplayer (localhost)
-        const socket = new WebSocket('ws://localhost:8080');
+        // Iluminação
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+        scene.add(ambientLight);
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.5);
+        directionalLight.position.set(0, 10, 10);
+        scene.add(directionalLight);
 
-        // Objetos do jogo
-        const player = {
-            x: 400,
-            y: 500,
-            width: 30,
-            height: 50,
-            speed: 0,
-            maxSpeed: 5,
-            angle: 0,
-            color: 'red',
-            id: null // ID será atribuído pelo servidor
-        };
+        // Moto do jogador (simplificada como cubo por enquanto)
+        const playerGeometry = new THREE.BoxGeometry(1, 0.5, 2);
+        const playerMaterial = new THREE.MeshPhongMaterial({ color: 0xff0000 });
+        const player = new THREE.Mesh(playerGeometry, playerMaterial);
+        player.position.set(0, 0.25, 0);
+        scene.add(player);
 
+        // Outros jogadores
         const otherPlayers = {};
 
-        let obstacles = [];
-        let distance = 0;
-        let backgroundOffset = 0;
+        // Pista infinita (plano simples)
+        const roadGeometry = new THREE.PlaneGeometry(20, 1000);
+        const roadMaterial = new THREE.MeshPhongMaterial({ color: 0x228B22 });
+        const road = new THREE.Mesh(roadGeometry, roadMaterial);
+        road.rotation.x = -Math.PI / 2;
+        scene.add(road);
+
+        // Obstáculos
+        const obstacles = [];
+
+        // Configuração da câmera (terceira pessoa)
+        camera.position.set(0, 5, 10);
+        camera.lookAt(player.position);
+
+        // WebSocket
+        const socket = new WebSocket('ws://localhost:8080');
+        let playerId = null;
 
         // Controles
-        const keys = {
-            w: false,
-            a: false,
-            s: false,
-            d: false
-        };
+        const keys = { w: false, a: false, s: false, d: false };
+        document.addEventListener('keydown', (e) => { if (e.key in keys) keys[e.key] = true; });
+        document.addEventListener('keyup', (e) => { if (e.key in keys) keys[e.key] = false; });
 
-        // Event listeners para controles
-        document.addEventListener('keydown', (e) => {
-            if (e.key in keys) keys[e.key] = true;
-        });
-        document.addEventListener('keyup', (e) => {
-            if (e.key in keys) keys[e.key] = false;
-        });
+        let speed = 0;
+        const maxSpeed = 0.2;
+        let angle = 0;
+        let distance = 0;
 
         // WebSocket eventos
-        socket.onopen = () => {
-            console.log('Conectado ao servidor local');
-        };
-
+        socket.onopen = () => console.log('Conectado ao servidor local');
         socket.onmessage = (event) => {
             const data = JSON.parse(event.data);
             if (data.type === 'init') {
-                player.id = data.id; // Recebe o ID do servidor
+                playerId = data.id;
             } else if (data.type === 'update') {
                 for (let id in data.players) {
-                    if (id !== player.id) {
-                        otherPlayers[id] = data.players[id];
+                    if (id !== playerId) {
+                        if (!otherPlayers[id]) {
+                            const otherGeometry = new THREE.BoxGeometry(1, 0.5, 2);
+                            const otherMaterial = new THREE.MeshPhongMaterial({ color: 0x0000ff });
+                            otherPlayers[id] = new THREE.Mesh(otherGeometry, otherMaterial);
+                            scene.add(otherPlayers[id]);
+                        }
+                        otherPlayers[id].position.set(data.players[id].x, 0.25, data.players[id].z);
+                        otherPlayers[id].rotation.y = data.players[id].angle;
                     }
                 }
             }
         };
 
-        socket.onerror = (error) => {
-            console.error('Erro no WebSocket:', error);
-        };
-
         // Geração de obstáculos
         function generateObstacle() {
-            obstacles.push({
-                x: Math.random() * (canvas.width - 50),
-                y: -50,
-                width: 50,
-                height: 50,
-                color: 'gray'
-            });
+            const obstacleGeometry = new THREE.BoxGeometry(2, 1, 2);
+            const obstacleMaterial = new THREE.MeshPhongMaterial({ color: 0x808080 });
+            const obstacle = new THREE.Mesh(obstacleGeometry, obstacleMaterial);
+            obstacle.position.set((Math.random() - 0.5) * 10, 0.5, -50 - Math.random() * 50);
+            obstacles.push(obstacle);
+            scene.add(obstacle);
         }
 
         // Atualização do jogo
         function update() {
+            // Controles
+            if (keys.w) speed = Math.min(speed + 0.005, maxSpeed);
+            if (keys.s) speed = Math.max(speed - 0.005, 0);
+            if (keys.a) angle += 0.03;
+            if (keys.d) angle -= 0.03;
+
             // Movimento da moto
-            if (keys.w) player.speed = Math.min(player.speed + 0.1, player.maxSpeed);
-            if (keys.s) player.speed = Math.max(player.speed - 0.1, 0);
-            if (keys.a) player.angle -= 0.05;
-            if (keys.d) player.angle += 0.05;
+            player.position.x += Math.sin(angle) * speed;
+            player.position.z -= Math.cos(angle) * speed;
+            player.rotation.y = angle;
 
-            player.x += Math.sin(player.angle) * player.speed;
-            player.y -= Math.cos(player.angle) * player.speed;
+            // Limites da pista
+            player.position.x = Math.max(-9, Math.min(9, player.position.x));
 
-            // Limites da tela
-            player.x = Math.max(player.width/2, Math.min(canvas.width - player.width/2, player.x));
-            player.y = Math.max(player.height/2, Math.min(canvas.height - player.height/2, player.y));
+            // Câmera segue a moto
+            camera.position.set(player.position.x, 5, player.position.z + 10);
+            camera.lookAt(player.position);
 
-            // Progresso e cenário
-            distance += player.speed;
-            backgroundOffset += player.speed;
-            if (backgroundOffset > canvas.height) backgroundOffset = 0;
+            // Pista infinita
+            if (player.position.z < road.position.z - 500) {
+                road.position.z -= 1000;
+            }
 
-            // Geração de obstáculos
+            // Obstáculos
             if (Math.random() < 0.02) generateObstacle();
-
-            // Movimento dos obstáculos
             obstacles.forEach(obstacle => {
-                obstacle.y += player.speed;
+                obstacle.position.z += speed;
+                if (checkCollision(player, obstacle)) speed = 0;
             });
-            obstacles = obstacles.filter(o => o.y < canvas.height);
-
-            // Colisão
-            obstacles.forEach(obstacle => {
-                if (checkCollision(player, obstacle)) {
-                    player.speed = 0;
-                }
+            obstacles.filter(o => o.position.z > player.position.z + 10).forEach(o => {
+                scene.remove(o);
+                obstacles.splice(obstacles.indexOf(o), 1);
             });
 
             // Enviar posição ao servidor
             if (socket.readyState === WebSocket.OPEN) {
                 socket.send(JSON.stringify({
                     type: 'move',
-                    id: player.id,
-                    x: player.x,
-                    y: player.y,
-                    angle: player.angle
+                    id: playerId,
+                    x: player.position.x,
+                    z: player.position.z,
+                    angle: angle
                 }));
             }
+
+            distance += speed;
         }
 
-        // Verificação de colisão
+        // Verificação de colisão simples
         function checkCollision(obj1, obj2) {
-            return obj1.x < obj2.x + obj2.width &&
-                   obj1.x + obj1.width > obj2.x &&
-                   obj1.y < obj2.y + obj2.height &&
-                   obj1.y + obj1.height > obj2.y;
+            const box1 = new THREE.Box3().setFromObject(obj1);
+            const box2 = new THREE.Box3().setFromObject(obj2);
+            return box1.intersectsBox(box2);
         }
 
         // Renderização
-        function draw() {
-            // Fundo dinâmico
-            ctx.fillStyle = '#87CEEB';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-            
-            ctx.fillStyle = '#228B22';
-            ctx.fillRect(0, backgroundOffset - canvas.height, canvas.width, canvas.height);
-            ctx.fillRect(0, backgroundOffset, canvas.width, canvas.height);
-
-            // Desenhar jogador
-            ctx.save();
-            ctx.translate(player.x, player.y);
-            ctx.rotate(player.angle);
-            ctx.fillStyle = player.color;
-            ctx.fillRect(-player.width/2, -player.height/2, player.width, player.height);
-            ctx.restore();
-
-            // Desenhar outros jogadores
-            for (let id in otherPlayers) {
-                const p = otherPlayers[id];
-                ctx.save();
-                ctx.translate(p.x, p.y);
-                ctx.rotate(p.angle);
-                ctx.fillStyle = 'blue';
-                ctx.fillRect(-player.width/2, -player.height/2, player.width, player.height);
-                ctx.restore();
-            }
-
-            // Desenhar obstáculos
-            obstacles.forEach(obstacle => {
-                ctx.fillStyle = obstacle.color;
-                ctx.fillRect(obstacle.x, obstacle.y, obstacle.width, obstacle.height);
-            });
-
-            // Distância percorrida
-            ctx.fillStyle = 'black';
-            ctx.font = '20px Arial';
-            ctx.fillText(`Distância: ${Math.floor(distance)}m`, 10, 30);
-        }
-
-        // Loop principal
-        function gameLoop() {
+        function animate() {
             update();
-            draw();
-            requestAnimationFrame(gameLoop);
+            renderer.render(scene, camera);
+            requestAnimationFrame(animate);
         }
 
         // Iniciar o jogo
-        gameLoop();
+        animate();
+
+        // Ajustar tamanho da janela
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
     </script>
 </body>
 </html>
