@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Moto Race Multiplayer</title>
+    <style>
+        canvas {
+            border: 1px solid black;
+        }
+        #game-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background: #87CEEB;
+        }
+    </style>
+</head>
+<body>
+    <div id="game-container">
+        <canvas id="gameCanvas" width="800" height="600"></canvas>
+    </div>
+
+    <script>
+        // Configuração do canvas
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // WebSocket para multiplayer (localhost)
+        const socket = new WebSocket('ws://localhost:8080');
+
+        // Objetos do jogo
+        const player = {
+            x: 400,
+            y: 500,
+            width: 30,
+            height: 50,
+            speed: 0,
+            maxSpeed: 5,
+            angle: 0,
+            color: 'red',
+            id: null // ID será atribuído pelo servidor
+        };
+
+        const otherPlayers = {};
+
+        let obstacles = [];
+        let distance = 0;
+        let backgroundOffset = 0;
+
+        // Controles
+        const keys = {
+            w: false,
+            a: false,
+            s: false,
+            d: false
+        };
+
+        // Event listeners para controles
+        document.addEventListener('keydown', (e) => {
+            if (e.key in keys) keys[e.key] = true;
+        });
+        document.addEventListener('keyup', (e) => {
+            if (e.key in keys) keys[e.key] = false;
+        });
+
+        // WebSocket eventos
+        socket.onopen = () => {
+            console.log('Conectado ao servidor local');
+        };
+
+        socket.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            if (data.type === 'init') {
+                player.id = data.id; // Recebe o ID do servidor
+            } else if (data.type === 'update') {
+                for (let id in data.players) {
+                    if (id !== player.id) {
+                        otherPlayers[id] = data.players[id];
+                    }
+                }
+            }
+        };
+
+        socket.onerror = (error) => {
+            console.error('Erro no WebSocket:', error);
+        };
+
+        // Geração de obstáculos
+        function generateObstacle() {
+            obstacles.push({
+                x: Math.random() * (canvas.width - 50),
+                y: -50,
+                width: 50,
+                height: 50,
+                color: 'gray'
+            });
+        }
+
+        // Atualização do jogo
+        function update() {
+            // Movimento da moto
+            if (keys.w) player.speed = Math.min(player.speed + 0.1, player.maxSpeed);
+            if (keys.s) player.speed = Math.max(player.speed - 0.1, 0);
+            if (keys.a) player.angle -= 0.05;
+            if (keys.d) player.angle += 0.05;
+
+            player.x += Math.sin(player.angle) * player.speed;
+            player.y -= Math.cos(player.angle) * player.speed;
+
+            // Limites da tela
+            player.x = Math.max(player.width/2, Math.min(canvas.width - player.width/2, player.x));
+            player.y = Math.max(player.height/2, Math.min(canvas.height - player.height/2, player.y));
+
+            // Progresso e cenário
+            distance += player.speed;
+            backgroundOffset += player.speed;
+            if (backgroundOffset > canvas.height) backgroundOffset = 0;
+
+            // Geração de obstáculos
+            if (Math.random() < 0.02) generateObstacle();
+
+            // Movimento dos obstáculos
+            obstacles.forEach(obstacle => {
+                obstacle.y += player.speed;
+            });
+            obstacles = obstacles.filter(o => o.y < canvas.height);
+
+            // Colisão
+            obstacles.forEach(obstacle => {
+                if (checkCollision(player, obstacle)) {
+                    player.speed = 0;
+                }
+            });
+
+            // Enviar posição ao servidor
+            if (socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({
+                    type: 'move',
+                    id: player.id,
+                    x: player.x,
+                    y: player.y,
+                    angle: player.angle
+                }));
+            }
+        }
+
+        // Verificação de colisão
+        function checkCollision(obj1, obj2) {
+            return obj1.x < obj2.x + obj2.width &&
+                   obj1.x + obj1.width > obj2.x &&
+                   obj1.y < obj2.y + obj2.height &&
+                   obj1.y + obj1.height > obj2.y;
+        }
+
+        // Renderização
+        function draw() {
+            // Fundo dinâmico
+            ctx.fillStyle = '#87CEEB';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            ctx.fillStyle = '#228B22';
+            ctx.fillRect(0, backgroundOffset - canvas.height, canvas.width, canvas.height);
+            ctx.fillRect(0, backgroundOffset, canvas.width, canvas.height);
+
+            // Desenhar jogador
+            ctx.save();
+            ctx.translate(player.x, player.y);
+            ctx.rotate(player.angle);
+            ctx.fillStyle = player.color;
+            ctx.fillRect(-player.width/2, -player.height/2, player.width, player.height);
+            ctx.restore();
+
+            // Desenhar outros jogadores
+            for (let id in otherPlayers) {
+                const p = otherPlayers[id];
+                ctx.save();
+                ctx.translate(p.x, p.y);
+                ctx.rotate(p.angle);
+                ctx.fillStyle = 'blue';
+                ctx.fillRect(-player.width/2, -player.height/2, player.width, player.height);
+                ctx.restore();
+            }
+
+            // Desenhar obstáculos
+            obstacles.forEach(obstacle => {
+                ctx.fillStyle = obstacle.color;
+                ctx.fillRect(obstacle.x, obstacle.y, obstacle.width, obstacle.height);
+            });
+
+            // Distância percorrida
+            ctx.fillStyle = 'black';
+            ctx.font = '20px Arial';
+            ctx.fillText(`Distância: ${Math.floor(distance)}m`, 10, 30);
+        }
+
+        // Loop principal
+        function gameLoop() {
+            update();
+            draw();
+            requestAnimationFrame(gameLoop);
+        }
+
+        // Iniciar o jogo
+        gameLoop();
+    </script>
+</body>
+</html>
