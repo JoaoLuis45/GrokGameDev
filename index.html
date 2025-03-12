@@ -1,174 +1,239 @@
 <!DOCTYPE html>
 <html>
-<head>
+  <head>
     <title>Moto Race 3D Multiplayer</title>
     <style>
-        body { margin: 0; overflow: hidden; }
-        #game-container { width: 100vw; height: 100vh; }
+      body {
+        margin: 0;
+        overflow: hidden;
+      }
+      #game-container {
+        width: 100vw;
+        height: 100vh;
+      }
     </style>
-</head>
-<body>
+  </head>
+  <body>
     <div id="game-container"></div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/examples/js/loaders/GLTFLoader.js"></script>
     <script>
-        // Configuração da cena 3D
-        const scene = new THREE.Scene();
-        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-        const renderer = new THREE.WebGLRenderer();
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        document.getElementById('game-container').appendChild(renderer.domElement);
+      // Configuração da cena 3D
+      const scene = new THREE.Scene();
+      const camera = new THREE.PerspectiveCamera(
+        75,
+        window.innerWidth / window.innerHeight,
+        0.1,
+        1000
+      );
+      const renderer = new THREE.WebGLRenderer();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      document
+        .getElementById("game-container")
+        .appendChild(renderer.domElement);
 
-        // Iluminação
-        const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
-        scene.add(ambientLight);
-        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.5);
-        directionalLight.position.set(0, 10, 10);
-        scene.add(directionalLight);
+      // Iluminação
+      const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+      scene.add(ambientLight);
+      const directionalLight = new THREE.DirectionalLight(0xffffff, 0.5);
+      directionalLight.position.set(0, 10, 10);
+      scene.add(directionalLight);
 
-        // Moto do jogador (simplificada como cubo por enquanto)
-        const playerGeometry = new THREE.BoxGeometry(1, 0.5, 2);
-        const playerMaterial = new THREE.MeshPhongMaterial({ color: 0xff0000 });
-        const player = new THREE.Mesh(playerGeometry, playerMaterial);
-        player.position.set(0, 0.25, 0);
-        scene.add(player);
+      // Moto do jogador (carregada como modelo 3D)
+      let player; // Será substituído pelo modelo carregado
+      const loader = new THREE.GLTFLoader();
+      loader.load(
+        "./motorcycle.glb", // Caminho relativo ao seu arquivo
+        (gltf) => {
+          player = gltf.scene;
+          player.scale.set(0.5, 0.5, 0.5); // Ajuste conforme o tamanho do modelo
+          player.position.set(0, 0, 0);
+          player.rotation.y = Math.PI; // Ajuste a orientação
+          scene.add(player);
+        },
+        (progress) =>
+          console.log(
+            `Carregando modelo: ${(
+              (progress.loaded / progress.total) *
+              100
+            ).toFixed(2)}%`
+          ),
+        (error) => console.error("Erro ao carregar o modelo:", error)
+      );
 
-        // Outros jogadores
-        const otherPlayers = {};
+      // Outros jogadores (usarão o mesmo modelo por simplicidade)
+      const otherPlayers = {};
+      const otherPlayerModels = {};
 
-        // Pista infinita (plano simples)
-        const roadGeometry = new THREE.PlaneGeometry(20, 1000);
-        const roadMaterial = new THREE.MeshPhongMaterial({ color: 0x228B22 });
-        const road = new THREE.Mesh(roadGeometry, roadMaterial);
-        road.rotation.x = -Math.PI / 2;
-        scene.add(road);
+      // Pista infinita
+      const roadGeometry = new THREE.PlaneGeometry(20, 1000);
+      const roadMaterial = new THREE.MeshPhongMaterial({ color: 0x228b22 });
+      const road = new THREE.Mesh(roadGeometry, roadMaterial);
+      road.rotation.x = -Math.PI / 2;
+      scene.add(road);
 
-        // Obstáculos
-        const obstacles = [];
+      // Obstáculos
+      const obstacles = [];
 
-        // Configuração da câmera (terceira pessoa)
-        camera.position.set(0, 5, 10);
-        camera.lookAt(player.position);
+      // Configuração da câmera
+      camera.position.set(0, 5, 10);
+      camera.lookAt(0, 0, 0);
 
-        // WebSocket
-        const socket = new WebSocket('ws://localhost:8080');
-        let playerId = null;
+      // WebSocket
+      const socket = new WebSocket("ws://localhost:8080");
+      let playerId = null;
+
+      // Controles
+      const keys = { w: false, a: false, s: false, d: false };
+      document.addEventListener("keydown", (e) => {
+        if (e.key in keys) keys[e.key] = true;
+      });
+      document.addEventListener("keyup", (e) => {
+        if (e.key in keys) keys[e.key] = false;
+      });
+
+      let speed = 0;
+      const maxSpeed = 0.2;
+      let angle = 0;
+      let distance = 0;
+
+      // WebSocket eventos
+      socket.onopen = () => console.log("Conectado ao servidor local");
+      socket.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        if (data.type === "init") {
+          playerId = data.id;
+        } else if (data.type === "update") {
+          for (let id in data.players) {
+            if (id !== playerId) {
+              if (!otherPlayers[id]) {
+                loader.load(
+                  "./motorcycle.glb", // Caminho relativo ao seu arquivo
+                  (gltf) => {
+                    player = gltf.scene;
+                    player.scale.set(0.5, 0.5, 0.5); // Ajuste conforme o tamanho do modelo
+                    player.position.set(0, 0, 0);
+                    player.rotation.y = Math.PI; // Ajuste a orientação
+                    scene.add(player);
+                  },
+                  (progress) =>
+                    console.log(
+                      `Carregando modelo: ${(
+                        (progress.loaded / progress.total) *
+                        100
+                      ).toFixed(2)}%`
+                    ),
+                  (error) => console.error("Erro ao carregar o modelo:", error)
+                );
+              } else {
+                otherPlayers[id].position.set(
+                  data.players[id].x,
+                  0,
+                  data.players[id].z
+                );
+                otherPlayers[id].rotation.y = data.players[id].angle;
+              }
+            }
+          }
+        }
+      };
+
+      // Geração de obstáculos
+      function generateObstacle() {
+        const obstacleGeometry = new THREE.BoxGeometry(2, 1, 2);
+        const obstacleMaterial = new THREE.MeshPhongMaterial({
+          color: 0x808080,
+        });
+        const obstacle = new THREE.Mesh(obstacleGeometry, obstacleMaterial);
+        obstacle.position.set(
+          (Math.random() - 0.5) * 10,
+          0.5,
+          -50 - Math.random() * 50
+        );
+        obstacles.push(obstacle);
+        scene.add(obstacle);
+      }
+
+      // Atualização do jogo
+      function update() {
+        if (!player) return; // Aguarda o modelo carregar
 
         // Controles
-        const keys = { w: false, a: false, s: false, d: false };
-        document.addEventListener('keydown', (e) => { if (e.key in keys) keys[e.key] = true; });
-        document.addEventListener('keyup', (e) => { if (e.key in keys) keys[e.key] = false; });
+        if (keys.w) speed = Math.min(speed + 0.005, maxSpeed);
+        if (keys.s) speed = Math.max(speed - 0.005, 0);
+        if (keys.a) angle += 0.03;
+        if (keys.d) angle -= 0.03;
 
-        let speed = 0;
-        const maxSpeed = 0.2;
-        let angle = 0;
-        let distance = 0;
+        // Movimento da moto
+        player.position.x += Math.sin(angle) * speed;
+        player.position.z -= Math.cos(angle) * speed;
+        player.rotation.y = angle;
 
-        // WebSocket eventos
-        socket.onopen = () => console.log('Conectado ao servidor local');
-        socket.onmessage = (event) => {
-            const data = JSON.parse(event.data);
-            if (data.type === 'init') {
-                playerId = data.id;
-            } else if (data.type === 'update') {
-                for (let id in data.players) {
-                    if (id !== playerId) {
-                        if (!otherPlayers[id]) {
-                            const otherGeometry = new THREE.BoxGeometry(1, 0.5, 2);
-                            const otherMaterial = new THREE.MeshPhongMaterial({ color: 0x0000ff });
-                            otherPlayers[id] = new THREE.Mesh(otherGeometry, otherMaterial);
-                            scene.add(otherPlayers[id]);
-                        }
-                        otherPlayers[id].position.set(data.players[id].x, 0.25, data.players[id].z);
-                        otherPlayers[id].rotation.y = data.players[id].angle;
-                    }
-                }
-            }
-        };
+        // Limites da pista
+        player.position.x = Math.max(-9, Math.min(9, player.position.x));
 
-        // Geração de obstáculos
-        function generateObstacle() {
-            const obstacleGeometry = new THREE.BoxGeometry(2, 1, 2);
-            const obstacleMaterial = new THREE.MeshPhongMaterial({ color: 0x808080 });
-            const obstacle = new THREE.Mesh(obstacleGeometry, obstacleMaterial);
-            obstacle.position.set((Math.random() - 0.5) * 10, 0.5, -50 - Math.random() * 50);
-            obstacles.push(obstacle);
-            scene.add(obstacle);
+        // Câmera segue a moto
+        camera.position.set(player.position.x, 5, player.position.z + 10);
+        camera.lookAt(player.position);
+
+        // Pista infinita
+        if (player.position.z < road.position.z - 500) {
+          road.position.z -= 1000;
         }
 
-        // Atualização do jogo
-        function update() {
-            // Controles
-            if (keys.w) speed = Math.min(speed + 0.005, maxSpeed);
-            if (keys.s) speed = Math.max(speed - 0.005, 0);
-            if (keys.a) angle += 0.03;
-            if (keys.d) angle -= 0.03;
-
-            // Movimento da moto
-            player.position.x += Math.sin(angle) * speed;
-            player.position.z -= Math.cos(angle) * speed;
-            player.rotation.y = angle;
-
-            // Limites da pista
-            player.position.x = Math.max(-9, Math.min(9, player.position.x));
-
-            // Câmera segue a moto
-            camera.position.set(player.position.x, 5, player.position.z + 10);
-            camera.lookAt(player.position);
-
-            // Pista infinita
-            if (player.position.z < road.position.z - 500) {
-                road.position.z -= 1000;
-            }
-
-            // Obstáculos
-            if (Math.random() < 0.02) generateObstacle();
-            obstacles.forEach(obstacle => {
-                obstacle.position.z += speed;
-                if (checkCollision(player, obstacle)) speed = 0;
-            });
-            obstacles.filter(o => o.position.z > player.position.z + 10).forEach(o => {
-                scene.remove(o);
-                obstacles.splice(obstacles.indexOf(o), 1);
-            });
-
-            // Enviar posição ao servidor
-            if (socket.readyState === WebSocket.OPEN) {
-                socket.send(JSON.stringify({
-                    type: 'move',
-                    id: playerId,
-                    x: player.position.x,
-                    z: player.position.z,
-                    angle: angle
-                }));
-            }
-
-            distance += speed;
-        }
-
-        // Verificação de colisão simples
-        function checkCollision(obj1, obj2) {
-            const box1 = new THREE.Box3().setFromObject(obj1);
-            const box2 = new THREE.Box3().setFromObject(obj2);
-            return box1.intersectsBox(box2);
-        }
-
-        // Renderização
-        function animate() {
-            update();
-            renderer.render(scene, camera);
-            requestAnimationFrame(animate);
-        }
-
-        // Iniciar o jogo
-        animate();
-
-        // Ajustar tamanho da janela
-        window.addEventListener('resize', () => {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
+        // Obstáculos
+        if (Math.random() < 0.02) generateObstacle();
+        obstacles.forEach((obstacle) => {
+          obstacle.position.z += speed;
+          if (checkCollision(player, obstacle)) speed = 0;
         });
+        obstacles
+          .filter((o) => o.position.z > player.position.z + 10)
+          .forEach((o) => {
+            scene.remove(o);
+            obstacles.splice(obstacles.indexOf(o), 1);
+          });
+
+        // Enviar posição ao servidor
+        if (socket.readyState === WebSocket.OPEN) {
+          socket.send(
+            JSON.stringify({
+              type: "move",
+              id: playerId,
+              x: player.position.x,
+              z: player.position.z,
+              angle: angle,
+            })
+          );
+        }
+
+        distance += speed;
+      }
+
+      // Verificação de colisão
+      function checkCollision(obj1, obj2) {
+        const box1 = new THREE.Box3().setFromObject(obj1);
+        const box2 = new THREE.Box3().setFromObject(obj2);
+        return box1.intersectsBox(box2);
+      }
+
+      // Renderização
+      function animate() {
+        update();
+        renderer.render(scene, camera);
+        requestAnimationFrame(animate);
+      }
+
+      // Iniciar o jogo
+      animate();
+
+      // Ajustar tamanho da janela
+      window.addEventListener("resize", () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      });
     </script>
-</body>
+  </body>
 </html>
